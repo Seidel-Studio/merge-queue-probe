@@ -1,0 +1,72 @@
+name: required-judge
+
+# Judges one pull request per run: on pull_request the pull request itself, on
+# merge_group the single queue entry whose commit is being tested. Everything it
+# decides with is written in this file; the tested tree is only read as data.
+on:
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: read
+
+jobs:
+  judge:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OWNER: ${{ github.repository_owner }}
+      NAME: ${{ github.event.repository.name }}
+      REPO: ${{ github.repository }}
+      EVENT_NAME: ${{ github.event_name }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      BASE_SHA: ${{ github.event.merge_group.base_sha }}
+      HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+      WORKFLOW_REF: ${{ github.workflow_ref }}
+      WORKFLOW_SHA: ${{ github.workflow_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          path: tested
+      - name: Find the pull request this run stands for
+        run: |
+          echo "judge loaded from $WORKFLOW_REF at $WORKFLOW_SHA, event $EVENT_NAME, tested commit $GITHUB_SHA"
+          if [ "$EVENT_NAME" = "merge_group" ]; then
+            parents=$(git -C tested log -1 --format=%P "$HEAD_SHA")
+            [ "$parents" = "$BASE_SHA" ] || { echo "refused: the tested commit is not one commit on its base ($parents)"; exit 1; }
+            number=$(gh api graphql -f owner="$OWNER" -f name="$NAME" -f query='
+              query($owner:String!,$name:String!){repository(owner:$owner,name:$name){
+                mergeQueue(branch:"main"){entries(first:100){nodes{headCommit{oid} pullRequest{number}}}}}}' \
+              --jq ".data.repository.mergeQueue.entries.nodes[] | select(.headCommit.oid==\"$HEAD_SHA\") | .pullRequest.number")
+            [ -n "$number" ] || { echo "refused: no queue entry has this commit"; exit 1; }
+          else
+            number="$PR_NUMBER"
+          fi
+          echo "NUMBER=$number" >> "$GITHUB_ENV"
+      - name: Read the pull request again and judge it
+        run: |
+          gh api graphql -f owner="$OWNER" -f name="$NAME" -F number="$NUMBER" -f query='
+            query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
+              pullRequest(number:$number){isDraft headRefOid additions deletions
+                labels(first:20){nodes{name}}
+                reviewThreads(first:100){nodes{isResolved}}}}}' --jq .data.repository.pullRequest > pull.json
+          head=$(jq -r .headRefOid pull.json)
+          draft=$(jq -r .isDraft pull.json)
+          open_threads=$(jq '[.reviewThreads.nodes[] | select(.isResolved | not)] | length' pull.json)
+          lines=$(jq '.additions + .deletions' pull.json)
+          large_ok=$(jq '[.labels.nodes[].name] | index("large-ok") != null' pull.json)
+          receipt=$(gh api "repos/$REPO/commits/$head/statuses" --jq '[.[] | select(.context=="stub-review")][0].state // "missing"')
+          echo "pull request $NUMBER head $head: draft $draft, unresolved threads $open_threads, receipt $receipt, $lines lines, large-ok $large_ok"
+          verdict=0
+          [ "$draft" = "false" ] || { echo "refused: draft"; verdict=1; }
+          [ "$open_threads" = "0" ] || { echo "refused: unresolved review threads"; verdict=1; }
+          [ "$receipt" = "success" ] || { echo "refused: no valid receipt on this head"; verdict=1; }
+          if [ "$lines" -gt 40 ] && [ "$large_ok" != "true" ]; then echo "refused: too large"; verdict=1; fi
+          exit $verdict
+      - name: Run the toy programs of the tested tree
+        working-directory: tested
+        run: |
+          for program in app/*.sh; do sh "$program"; done
