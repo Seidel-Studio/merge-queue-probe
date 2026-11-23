@@ -1,0 +1,92 @@
+name: gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+  merge_group:
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: read
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  REPO: ${{ github.repository }}
+  EVENT_NAME: ${{ github.event_name }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  PR_HEAD: ${{ github.event.pull_request.head.sha }}
+  BASE_SHA: ${{ github.event.merge_group.base_sha }}
+  HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+  REF_NAME: ${{ github.ref }}
+
+jobs:
+  context:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: What this run knows
+        env:
+          EVENT_JSON: ${{ toJSON(github.event) }}
+        run: |
+          echo "event $EVENT_NAME sha $GITHUB_SHA ref $GITHUB_REF workflow_sha $GITHUB_WORKFLOW_SHA"
+          echo "tree $(git rev-parse HEAD^{tree})"
+          if [ "$EVENT_NAME" = "merge_group" ]; then echo "$EVENT_JSON"; fi
+          git log --format='%H %P | %s' -5
+
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh checks/stub.sh source 5
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh checks/stub.sh build 8
+      - run: sh checks/run.sh
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh checks/stub.sh browser 25
+
+  authorization:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh checks/stub.sh authorization 6
+
+  receipt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: sh checks/members.sh members.txt
+      - run: sh checks/receipt.sh members.txt
+
+  size:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: sh checks/members.sh members.txt
+      - run: sh checks/size.sh members.txt
+
+  gate:
+    if: always()
+    needs: [source, build, browser, authorization, receipt, size]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every stub job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          for result in $RESULTS; do [ "$result" = "success" ] || exit 1; done
