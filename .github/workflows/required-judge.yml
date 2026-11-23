@@ -29,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
           path: tested
       - name: Find the pull request this run stands for
         run: |
@@ -59,6 +59,13 @@ jobs:
           lines=$(jq '.additions + .deletions' pull.json)
           large_ok=$(jq '[.labels.nodes[].name] | index("large-ok") != null' pull.json)
           receipt=$(gh api "repos/$REPO/commits/$head/statuses" --jq '[.[] | select(.context=="stub-review")][0].state // "missing"')
+          if [ "$EVENT_NAME" = "merge_group" ]; then
+            git -C tested fetch -q origin "$head"
+            expected=$(git -C tested merge-tree --write-tree "$BASE_SHA" "$head") || expected=conflict
+            tested_tree=$(git -C tested rev-parse "$HEAD_SHA^{tree}")
+            echo "tested tree $tested_tree, tree of this head merged into the base $expected"
+            [ "$expected" = "$tested_tree" ] || { echo "refused: the tested commit is not this head on its base"; exit 1; }
+          fi
           echo "pull request $NUMBER head $head: draft $draft, unresolved threads $open_threads, receipt $receipt, $lines lines, large-ok $large_ok"
           verdict=0
           [ "$draft" = "false" ] || { echo "refused: draft"; verdict=1; }
