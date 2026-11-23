@@ -1,8 +1,9 @@
 name: queue-only
 
-# Runs for merge groups only. Its steps come from this file's own commit: the tested tree is
+# Judges merge groups only; on a pull request every job is skipped. Its steps come from this file's own commit: the tested tree is
 # checked out beside it and only read.
 on:
+  pull_request:
   merge_group:
 
 permissions:
@@ -10,6 +11,7 @@ permissions:
 
 jobs:
   judge:
+    if: ${{ github.event_name == 'merge_group' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,7 +25,7 @@ jobs:
       - uses: ./trusted/.github/actions/toy
 
   build:
-    if: ${{ !contains(github.event.merge_group.head_commit.message, 'skip-build') }}
+    if: ${{ github.event_name == 'merge_group' && !contains(github.event.merge_group.head_commit.message, 'skip-build') }}
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:
@@ -34,7 +36,7 @@ jobs:
           echo "build ok"
 
   verdict:
-    if: ${{ always() }}
+    if: ${{ always() && github.event_name == 'merge_group' }}
     needs: [judge, build]
     runs-on: ubuntu-latest
     steps:
