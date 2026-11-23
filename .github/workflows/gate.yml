@@ -8,7 +8,7 @@ on:
 permissions:
   contents: read
   pull-requests: read
-  statuses: write
+  statuses: read
 
 env:
   GH_TOKEN: ${{ github.token }}
@@ -67,10 +67,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: echo "receipt not read by this copy of the workflow"
-      - name: Report the follow-up judge's status from inside the candidate
-        if: github.event_name == 'merge_group'
-        run: gh api -X POST "repos/$REPO/statuses/$GITHUB_SHA" -f state=success -f context=trusted-gate -f description="posted by the candidate workflow"
+      - run: sh checks/members.sh members.txt
+      - run: sh checks/receipt.sh members.txt
 
   size:
     runs-on: ubuntu-latest
