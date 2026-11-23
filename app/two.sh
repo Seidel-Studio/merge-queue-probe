@@ -1,2 +1,2 @@
-. lib/salute.sh
+. lib/greet.sh
 salute two
