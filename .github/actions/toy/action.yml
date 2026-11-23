@@ -1,0 +1,7 @@
+name: toy
+description: Stub local action; prints which copy of it ran.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: echo "toy action, copy of the default branch"

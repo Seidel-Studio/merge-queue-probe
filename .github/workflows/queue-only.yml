@@ -1,0 +1,47 @@
+name: queue-only
+
+# Runs for merge groups only. Its steps come from this file's own commit: the tested tree is
+# checked out beside it and only read.
+on:
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  judge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+      - uses: actions/checkout@v4
+        with:
+          path: tested
+      - run: echo "workflow_sha $GITHUB_WORKFLOW_SHA, trusted copy at $(git -C trusted rev-parse HEAD), tested commit $(git -C tested rev-parse HEAD)"
+      - uses: ./trusted/.github/actions/toy
+
+  build:
+    if: ${{ !contains(github.event.merge_group.head_commit.message, 'skip-build') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - env:
+          MESSAGE: ${{ github.event.merge_group.head_commit.message }}
+        run: |
+          case "$MESSAGE" in *slow-build*) sleep 150 ;; esac
+          echo "build ok"
+
+  verdict:
+    if: ${{ always() }}
+    needs: [judge, build]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          JUDGE: ${{ needs.judge.result }}
+          BUILD: ${{ needs.build.result }}
+        run: |
+          echo "judge $JUDGE, build $BUILD"
+          [ "$JUDGE" = success ] || exit 1
+          [ "$BUILD" = success ] || exit 1
