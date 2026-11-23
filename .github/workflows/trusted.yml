@@ -1,0 +1,52 @@
+name: trusted
+
+# Runs from the default branch after every gate run and repeats the judgement
+# on the tested commit with the default branch's copy of the checks.
+on:
+  workflow_run:
+    workflows: [gate]
+    types: [completed]
+
+permissions:
+  contents: read
+  statuses: write
+  pull-requests: read
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  REPO: ${{ github.repository }}
+  TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+  TESTED_BRANCH: ${{ github.event.workflow_run.head_branch }}
+  TESTED_EVENT: ${{ github.event.workflow_run.event }}
+  TESTED_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+  TESTED_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+
+jobs:
+  judge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: trusted
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          path: candidate
+      - name: Judge the tested commit with the default branch's checks
+        run: |
+          echo "this workflow: sha $GITHUB_SHA ref $GITHUB_REF workflow_sha $GITHUB_WORKFLOW_SHA"
+          echo "tested: $TESTED_EVENT $TESTED_BRANCH $TESTED_SHA concluded $TESTED_CONCLUSION, pull request field [$TESTED_PR]"
+          state=success
+          [ "$TESTED_CONCLUSION" = "success" ] || state=failure
+          (cd candidate && sh ../trusted/checks/run.sh) || state=failure
+          if [ "$TESTED_EVENT" = "merge_group" ]; then
+            pr=$(gh api graphql -f query='{repository(owner:"${{ github.repository_owner }}",name:"${{ github.event.repository.name }}"){mergeQueue(branch:"main"){entries(first:100){nodes{headCommit{oid} pullRequest{number headRefOid}}}}}}' --jq ".data.repository.mergeQueue.entries.nodes[] | select(.headCommit.oid==\"$TESTED_SHA\") | \"\(.pullRequest.number) \(.pullRequest.headRefOid)\"")
+          else
+            pr=$(gh api "repos/$REPO/commits/$TESTED_SHA/pulls" --jq '.[0] | "\(.number) \(.head.sha)"')
+          fi
+          echo "member: [$pr]"
+          head="${pr#* }"
+          receipt=$(gh api "repos/$REPO/commits/$head/statuses" --jq '[.[] | select(.context=="stub-review")][0].state // "missing"' || echo missing)
+          echo "receipt on $head: $receipt"
+          [ "$receipt" = "success" ] || state=failure
+          gh api -X POST "repos/$REPO/statuses/$TESTED_SHA" -f state="$state" -f context=trusted-gate -f description="judged by the default branch copy" --jq '"posted \(.context) \(.state)"'
