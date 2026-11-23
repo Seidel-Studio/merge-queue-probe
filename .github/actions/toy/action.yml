@@ -4,4 +4,4 @@ runs:
   using: composite
   steps:
     - shell: bash
-      run: echo "toy action, copy of the default branch"
+      run: echo "toy action, copy of the candidate"
