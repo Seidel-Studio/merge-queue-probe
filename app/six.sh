@@ -1,2 +1,2 @@
 . lib/greet.sh
-greet six
+salute six
