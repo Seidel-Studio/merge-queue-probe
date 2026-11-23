@@ -4,4 +4,4 @@ runs:
   using: composite
   steps:
     - shell: bash
-      run: echo "toy action, copy of the candidate"
+      run: echo "toy action, second candidate copy, must not run"
