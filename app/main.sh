@@ -1,2 +1,2 @@
-. lib/greet.sh
-greet world
+. lib/salute.sh
+salute world
